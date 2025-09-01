@@ -1,0 +1,28 @@
+{
+  "name": "avr-sts-gemini",
+  "version": "1.2.0",
+  "author": "Agent Voice Response <info@agentvoiceresponse.com>",
+  "description": "Gemini Speech-to-Speech service for Agent Voice Response",
+  "main": "index.js",
+  "scripts": {
+    "start": "node .",
+    "start:dev": "nodemon --inspect ./index.js",
+    "dc:build": "docker build --platform=linux/amd64 -t agentvoiceresponse/avr-sts-gemini:latest -t agentvoiceresponse/avr-sts-gemini:${npm_package_version} .",
+    "dc:push": "docker push agentvoiceresponse/avr-sts-gemini:latest && docker push agentvoiceresponse/avr-sts-gemini:${npm_package_version}"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "contributors": [
+    {
+      "name": "Giuseppe Careri",
+      "email": "info@gcareri.com",
+      "url": "https://github.com/gcareri"
+    }
+  ]
+}
