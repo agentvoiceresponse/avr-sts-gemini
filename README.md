@@ -5,15 +5,15 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/agentvoiceresponse/avr-sts-gemini?label=Docker%20Pulls&logo=docker)](https://hub.docker.com/r/agentvoiceresponse/avr-sts-gemini)
 [![Ko-fi](https://img.shields.io/badge/Support%20us%20on-Ko--fi-ff5e5b.svg)](https://ko-fi.com/agentvoiceresponse)
 
-This repository showcases the integration between **Agent Voice Response** and **Gemini Real-time Speech-to-Speech API**. The application leverages Gemini powerful language model to process audio input from users, providing intelligent, context-aware responses in real-time audio format.
+This repository showcases the integration between **Agent Voice Response** and **Gemini Live Speech-to-Speech API**. The application leverages Gemini's powerful language model to process audio input from users, providing intelligent, context-aware responses in real-time audio format with automatic audio format conversion.
 
 ## Features
 
-- **Dual Call Types**: Support for both agent-specific calls and generic calls
-- **Real-time Streaming**: WebSocket-based audio streaming with buffering
-- **External Voice Support**: Integration with Gemini, Cartesia, LMNT, and generic voice providers
+- **Real-time Streaming**: WebSocket-based audio streaming with Gemini Live API
+- **Audio Format Conversion**: Automatic conversion between 8kHz, 16kHz, and 24kHz sample rates
+- **Gemini Integration**: Direct integration with Google's Gemini Live Speech-to-Speech API
 - **Configurable Audio Settings**: Customizable sample rates and buffer sizes
-- **Tool Integration**: Support for custom tools and VAD settings
+- **Session Management**: Efficient WebSocket session handling for continuous audio streaming
 
 ## Configuration
 
@@ -21,8 +21,19 @@ This repository showcases the integration between **Agent Voice Response** and *
 
 Copy `.env.example` to `.env` and configure the following variables:
 
-#### Basic Configuration
-- `PORT`: Server port (default: 6037)
+Required:
+
+```
+GEMINI_API_KEY: Google API key with access to Gemini Live
+```
+
+Optional:
+
+```
+PORT (default: 6037)
+GEMINI_MODEL (default: gemini-2.5-flash-preview-native-audio-dialog)
+GEMINI_INSTRUCTIONS (system prompt)
+```
 
 ## Usage
 
@@ -39,21 +50,17 @@ Send a POST request to `/speech-to-speech-stream` with:
 
 - **Headers:**
   - `x-uuid`: Unique identifier for the call
-  - `Content-Type`: `audio/wav` (or appropriate audio format)
+  - `Content-Type`: `audio/pcm` or appropriate audio format
 
-- **Body:** Raw audio data stream
-
-### Example Usage
-
-
+- **Body:** Raw audio data stream (8kHz PCM recommended)
 
 ## API Response
 
-The service returns a stream of audio data from Ultravox. The response includes:
+The service returns a stream of audio data from Gemini. The response includes:
 
 - Real-time audio chunks from the AI
-- JSON control messages for call state management
-- Transcript information
+- Audio format conversion (8kHz ↔ 16kHz ↔ 24kHz)
+- Session management and WebSocket communication
 
 ## Error Handling
 
@@ -63,6 +70,7 @@ The service handles various error scenarios:
 - Invalid API responses
 - WebSocket connection failures
 - Audio processing errors
+- Audio format conversion issues
 
 ## Docker Support
 
