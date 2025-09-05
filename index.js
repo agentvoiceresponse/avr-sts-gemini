@@ -11,7 +11,8 @@
 
 const express = require("express");
 const { create } = require("@alexanderolsen/libsamplerate-js");
-const { GoogleGenAI, Modality, TurnCoverage } = require("@google/genai");
+const { GoogleGenAI, Modality } = require("@google/genai");
+const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
 
@@ -28,6 +29,14 @@ const connectToGeminiSdk = async (callbacks) => {
       process.env.GEMINI_INSTRUCTIONS ||
       "You are a helpful assistant and answer in a friendly tone.",
   };
+
+  try {
+    const tools = loadTools();
+    config.tools = [{ functionDeclarations: tools }];
+    console.log(`Loaded ${tools.length} tools for Gemini`);
+  } catch (error) {
+    console.error(`Error loading tools for Gemini: ${error.message}`);
+  }
 
   console.log("Gemini Session Config:", config);
   console.log("Gemini Session Model:", model);
@@ -86,12 +95,12 @@ const handleAudioStream = async (req, res) => {
     return Buffer.from(Int16Array.from(upsampledSamples).buffer);
   }
 
-  const sdkCallbacks = {
+  const session = await connectToGeminiSdk({
     onopen: function () {
       console.debug("Gemini Session Opened");
     },
-    onmessage: function (message) {
-      if(message.serverContent?.modelTurn?.parts) {
+    onmessage: async function (message) {
+      if (message.serverContent?.modelTurn?.parts) {
         const part = message.serverContent?.modelTurn?.parts?.[0];
         if (part?.inlineData) {
           const inlineData = part.inlineData;
@@ -101,9 +110,26 @@ const handleAudioStream = async (req, res) => {
             res.write(frame);
           });
         }
-        if (part?.text) {
-          console.debug("Gemini Session Text:", part.text);
+      } else if (message.toolCall?.functionCalls) {
+        console.log("Gemini Session Tool Calls:", message.toolCall.functionCalls);
+        const functionResponses = [];
+        for (const fc of message.toolCall.functionCalls) {
+          const handler = getToolHandler(fc.name);
+          const obj = {
+            id: fc.id,
+            name: fc.name,
+            response: { result: "" },
+          };
+          if (!handler) {
+            obj.response.result = `I'm sorry, I cannot retrieve the requested information.`;
+            functionResponses.push(obj);
+          } else {
+            obj.response.result = await handler(sessionUuid, fc.args);
+            functionResponses.push(obj);
+          }
+          console.log("Gemini Session Tool Response:", obj.response.result);
         }
+        session.sendToolResponse({ functionResponses });
       }
     },
     onerror: function (e) {
@@ -112,8 +138,7 @@ const handleAudioStream = async (req, res) => {
     onclose: function () {
       console.info("Gemini Session Closed");
     },
-  };
-  const session = await connectToGeminiSdk(sdkCallbacks);
+  });
 
   req.on("data", (chunk) => {
     const upsampledAudio = convert8kTo16k(chunk); // Convert 8kHz to 16kHz
