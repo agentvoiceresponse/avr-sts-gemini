@@ -1,23 +1,48 @@
 /**
  * index.js
- * Entry point for the Gemini Speech-to-Speech streaming application.
+ * Entry point for the Gemini Speech-to-Speech streaming WebSocket server.
  * This server handles real-time audio streaming between clients and Gemini's API,
  * performing necessary audio format conversions and WebSocket communication.
- * Supports both agent-specific calls and generic calls.
+ *
+ * Client Protocol:
+ * - Send {"type": "init", "uuid": "uuid"} to initialize session
+ * - Send {"type": "audio", "audio": "base64_encoded_audio"} to stream audio
+ * - Receive {"type": "audio", "audio": "base64_encoded_audio"} for responses
+ * - Receive {"type": "error", "message": "error_message"} for errors
  *
  * @author Agent Voice Response <info@agentvoiceresponse.com>
  * @see https://www.agentvoiceresponse.com
  */
 
-const express = require("express");
+const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { GoogleGenAI, Modality } = require("@google/genai");
 const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
 
-// Initialize Express application
-const app = express();
+/**
+ * Stream Processing
+ */
+
+// Global audio resamplers - created once and shared across all connections
+let globalDownsampler = null;
+let globalUpsampler = null;
+
+/**
+ * Initializes global audio resamplers for format conversion.
+ * Called once at server startup.
+ */
+const initializeResamplers = async () => {
+  try {
+    globalDownsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
+    globalUpsampler = await create(1, 8000, 16000); // 1 channel, 8kHz to 16kHz
+    console.log("Global audio resamplers initialized");
+  } catch (error) {
+    console.error("Error initializing resamplers:", error);
+    process.exit(1);
+  }
+};
 
 const connectToGeminiSdk = async (callbacks) => {
   const model =
@@ -53,120 +78,253 @@ const connectToGeminiSdk = async (callbacks) => {
 };
 
 /**
- * Handles incoming client audio stream and manages communication with Gemini Live API.
- * Buffers audio chunks and sends fixed-size frames upstream; buffers downlink audio and
- * writes fixed-size frames downstream to the HTTP response.
+ * Handles incoming client WebSocket connection and manages communication with Gemini Live API.
+ * Implements buffering for audio chunks received before WebSocket connection is established.
+ *
+ * @param {WebSocket} clientWs - Client WebSocket connection
  */
-const handleAudioStream = async (req, res) => {
-  console.log("New audio stream received (Gemini)");
-  const sessionUuid = req.headers["x-uuid"];
-  console.log("Session UUID:", sessionUuid);
-
-  const downsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
-  const upsampler = await create(1, 8000, 16000); // 1 channel, 8kHz to 24kHz
+const handleClientConnection = (clientWs) => {
+  console.log("New client WebSocket connection received");
+  let sessionUuid = null;
 
   let audioBuffer8k = [];
-
-  function convert24kTo8k(inputBuffer) {
+  let session = null;
+  let audioFrames = [];
+  
+  /**
+   * Processes Gemini audio chunks by downsampling and extracting frames.
+   * Converts 24kHz audio to 8kHz and extracts 20ms frames (160 samples).
+   *
+   * @param {Buffer} inputBuffer - Raw audio buffer from Gemini
+   * @returns {Buffer[]} Array of 20ms audio frames
+   */
+  function processGeminiAudioChunk(inputBuffer) {
+    // Convert Buffer to Int16Array for processing
     const inputSamples = new Int16Array(
       inputBuffer.buffer,
       inputBuffer.byteOffset,
       inputBuffer.length / 2
     );
-    const downsampledSamples = downsampler.full(inputSamples);
+
+    // Downsample from 24kHz to 8kHz using global downsampler
+    const downsampledSamples = globalDownsampler.full(inputSamples);
+
+    // Accumulate samples in buffer
     audioBuffer8k = audioBuffer8k.concat(Array.from(downsampledSamples));
+
+    // Extract 20ms frames (160 samples = 320 bytes)
     const audioFrames = [];
     while (audioBuffer8k.length >= 160) {
       const frame = audioBuffer8k.slice(0, 160);
       audioBuffer8k = audioBuffer8k.slice(160);
+
+      // Convert to PCM16LE Buffer (320 bytes)
       audioFrames.push(Buffer.from(Int16Array.from(frame).buffer));
     }
 
     return audioFrames;
   }
 
+  /**
+   * Converts 8kHz audio to 16kHz for sending to Gemini API.
+   *
+   * @param {Buffer} inputBuffer - 8kHz audio buffer
+   * @returns {Buffer} 16kHz audio buffer
+   */
   function convert8kTo16k(inputBuffer) {
     const inputSamples = new Int16Array(
       inputBuffer.buffer,
       inputBuffer.byteOffset,
       inputBuffer.length / 2
     );
-    const upsampledSamples = upsampler.full(inputSamples);
+    const upsampledSamples = globalUpsampler.full(inputSamples);
     return Buffer.from(Int16Array.from(upsampledSamples).buffer);
   }
 
-  const session = await connectToGeminiSdk({
-    onopen: function () {
-      console.debug("Gemini Session Opened");
-    },
-    onmessage: async function (message) {
-      if (message.serverContent?.modelTurn?.parts) {
-        const part = message.serverContent?.modelTurn?.parts?.[0];
-        if (part?.inlineData) {
-          const inlineData = part.inlineData;
-          const audioChunk = Buffer.from(inlineData.data, "base64");
-          const audioFrames = convert24kTo8k(audioChunk);
-          audioFrames.forEach((frame) => {
-            res.write(frame);
-          });
-        }
-      } else if (message.toolCall?.functionCalls) {
-        console.log("Gemini Session Tool Calls:", message.toolCall.functionCalls);
-        const functionResponses = [];
-        for (const fc of message.toolCall.functionCalls) {
-          const handler = getToolHandler(fc.name);
-          const obj = {
-            id: fc.id,
-            name: fc.name,
-            response: { result: "" },
-          };
-          if (!handler) {
-            obj.response.result = `I'm sorry, I cannot retrieve the requested information.`;
-            functionResponses.push(obj);
-          } else {
-            obj.response.result = await handler(sessionUuid, fc.args);
-            functionResponses.push(obj);
+  // Handle client WebSocket messages
+  clientWs.on("message", (data) => {
+    try {
+      const message = JSON.parse(data);
+      switch (message.type) {
+        case "init":
+          sessionUuid = message.uuid;
+          console.log("Session UUID:", sessionUuid);
+          // Initialize Gemini connection when client is ready
+          initializeGeminiConnection();
+          break;
+
+        case "audio":
+          // Handle audio data from client
+          if (message.audio && session) {
+            const audioBuffer = Buffer.from(message.audio, "base64");
+            const upsampledAudio = convert8kTo16k(audioBuffer);
+            session.sendRealtimeInput({
+              audio: {
+                data: upsampledAudio.toString("base64"),
+                mimeType: "audio/pcm;rate=16000",
+              },
+            });
           }
-          console.log("Gemini Session Tool Response:", obj.response.result);
-        }
-        session.sendToolResponse({ functionResponses });
+          break;
+
+        default:
+          console.log("Unknown message type from client:", message.type);
+          break;
       }
-    },
-    onerror: function (e) {
-      console.error("Gemini Session Error:", e.message);
-    },
-    onclose: function () {
-      console.info("Gemini Session Closed");
-    },
+    } catch (error) {
+      console.error("Error processing client message:", error);
+    }
   });
 
-  req.on("data", (chunk) => {
-    const upsampledAudio = convert8kTo16k(chunk); // Convert 8kHz to 16kHz
-    const base64Audio = upsampledAudio.toString("base64");
-    session.sendRealtimeInput({
-      audio: {
-        data: base64Audio,
-        mimeType: "audio/pcm;rate=16000",
-      },
-    });
+  // Initialize Gemini connection
+  const initializeGeminiConnection = async () => {
+    try {
+      session = await connectToGeminiSdk({
+        onopen: function () {
+          console.debug("Gemini Session Opened");
+        },
+        onmessage: async function (message) {
+          if (message.serverContent?.modelTurn?.parts) {
+            const part = message.serverContent?.modelTurn?.parts?.[0];
+            if (part?.inlineData) {
+              const inlineData = part.inlineData;
+              const audioChunk = Buffer.from(inlineData.data, "base64");
+              audioFrames = processGeminiAudioChunk(audioChunk);
+              // Send audio frames to client
+              audioFrames.forEach((frame) => {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "audio",
+                    audio: frame.toString("base64"),
+                  })
+                );
+              });
+            }
+          } else if (message.toolCall?.functionCalls) {
+            console.log("Gemini Session Tool Calls:", message.toolCall.functionCalls);
+            const functionResponses = [];
+            for (const fc of message.toolCall.functionCalls) {
+              const handler = getToolHandler(fc.name);
+              const obj = {
+                id: fc.id,
+                name: fc.name,
+                response: { result: "" },
+              };
+              if (!handler) {
+                obj.response.result = `I'm sorry, I cannot retrieve the requested information.`;
+                functionResponses.push(obj);
+              } else {
+                obj.response.result = await handler(sessionUuid, fc.args);
+                functionResponses.push(obj);
+              }
+              console.log("Gemini Session Tool Response:", obj.response.result);
+            }
+            
+            session.sendToolResponse({ functionResponses });
+          } else if (message.serverContent?.interrupted) {
+            console.log("Gemini Session Interruption");
+            audioFrames = [];
+            clientWs.send(JSON.stringify({ type: "interruption" }));
+          } else {
+            // console.log("Gemini Session Message:", message);
+          }
+        },
+        onerror: function (e) {
+          console.error("Gemini Session Error:", e.message);
+          clientWs.send(
+            JSON.stringify({
+              type: "error",
+              message: e.message,
+            })
+          );
+        },
+        onclose: function () {
+          console.info("Gemini Session Closed");
+          clientWs.close();
+        },
+      });
+    } catch (error) {
+      console.error("Error initializing Gemini connection:", error);
+      clientWs.send(
+        JSON.stringify({
+          type: "error",
+          message: "Failed to initialize Gemini connection",
+        })
+      );
+    }
+  };
+
+  // Handle client WebSocket close
+  clientWs.on("close", () => {
+    console.log("Client WebSocket connection closed");
+    cleanup();
   });
 
-  req.on("end", () => {
-    console.log("Request stream ended");
-    session.close();
+  clientWs.on("error", (err) => {
+    console.error("Client WebSocket error:", err);
+    cleanup();
   });
 
-  req.on("error", (err) => {
-    console.error("Request error:", err);
-    session.close();
-  });
+  /**
+   * Cleans up resources and closes connections.
+   */
+  function cleanup() {
+    if (session) session.close();
+    if (clientWs) clientWs.close();
+  }
 };
 
-// API Endpoints
-app.post("/speech-to-speech-stream", handleAudioStream);
+/**
+ * Global cleanup function to destroy resamplers when the process is terminated.
+ */
+const cleanupGlobalResources = () => {
+  console.log("Cleaning up global resources...");
+  if (globalDownsampler) {
+    globalDownsampler.destroy();
+    globalDownsampler = null;
+  }
+  if (globalUpsampler) {
+    globalUpsampler.destroy();
+    globalUpsampler = null;
+  }
+  console.log("Global resources cleaned up");
+};
 
-// Start server
-const PORT = process.env.PORT || 6037;
-app.listen(PORT, () => {
-  console.log(`Gemini Speech-to-Speech server running on port ${PORT}`);
+// Handle process termination signals
+process.on("SIGINT", () => {
+  console.log("Received SIGINT, shutting down gracefully...");
+  cleanupGlobalResources();
+  process.exit(0);
 });
+
+process.on("SIGTERM", () => {
+  console.log("Received SIGTERM, shutting down gracefully...");
+  cleanupGlobalResources();
+  process.exit(0);
+});
+
+// Initialize resamplers and start server
+const startServer = async () => {
+  try {
+    await initializeResamplers();
+
+    // Create WebSocket server
+    const PORT = process.env.PORT || 6037;
+    const wss = new WebSocket.Server({ port: PORT });
+
+    wss.on("connection", (clientWs) => {
+      console.log("New client connected");
+      handleClientConnection(clientWs);
+    });
+
+    console.log(
+      `Gemini Speech-to-Speech WebSocket server running on port ${PORT}`
+    );
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
