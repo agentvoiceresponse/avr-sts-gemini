@@ -17,6 +17,8 @@
 const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { GoogleGenAI, Modality } = require("@google/genai");
+const axios = require("axios");
+const fs = require("fs").promises;
 const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
@@ -44,16 +46,54 @@ const initializeResamplers = async () => {
   }
 };
 
-const connectToGeminiSdk = async (callbacks) => {
+const connectToGeminiSdk = async (sessionUuid, callbacks) => {
   const model =
     process.env.GEMINI_MODEL || "gemini-2.5-flash-preview-native-audio-dialog";
 
   const config = {
     responseModalities: [Modality.AUDIO],
     systemInstruction:
-      process.env.GEMINI_INSTRUCTIONS ||
       "You are a helpful assistant and answer in a friendly tone.",
   };
+
+  if (process.env.GEMINI_INSTRUCTIONS) {
+    config.systemInstruction = process.env.GEMINI_INSTRUCTIONS;
+    console.log("Using GEMINI_INSTRUCTIONS from environment variable");
+  } else if (process.env.GEMINI_URL_INSTRUCTIONS) {
+    try {
+      const response = await axios.get(process.env.GEMINI_URL_INSTRUCTIONS, {
+        headers: {
+          "Content-Type": "application/json",
+          "X-AVR-UUID": sessionUuid,
+        },
+      });
+      console.log("Instructions loaded from GEMINI_URL_INSTRUCTIONS");
+      const data = await response.data;
+      console.log(data);
+      config.systemInstruction = data.system;
+    } catch (error) {
+      console.error(
+        `Error loading instructions from ${process.env.GEMINI_URL_INSTRUCTIONS}: ${error.message}`
+      );
+    }
+  } else if (process.env.GEMINI_FILE_INSTRUCTIONS) {
+    try {
+      const data = await fs.readFile(
+        process.env.GEMINI_FILE_INSTRUCTIONS,
+        "utf8"
+      );
+      console.log("Using GEMINI_FILE_INSTRUCTIONS from environment variable");
+      console.log(data);
+      config.systemInstruction = data;
+    } catch (error) {
+      console.error(
+        `Error loading instructions from ${process.env.GEMINI_FILE_INSTRUCTIONS}: ${error.message}`
+      );
+    }
+  } else {
+    console.log("Using default instructions");
+    config.systemInstruction = "You are a helpful assistant and answer in a friendly tone.";
+  }
 
   try {
     const tools = loadTools();
@@ -90,7 +130,7 @@ const handleClientConnection = (clientWs) => {
   let audioBuffer8k = [];
   let session = null;
   let audioFrames = [];
-  
+
   /**
    * Processes Gemini audio chunks by downsampling and extracting frames.
    * Converts 24kHz audio to 8kHz and extracts 20ms frames (160 samples).
@@ -179,7 +219,7 @@ const handleClientConnection = (clientWs) => {
   // Initialize Gemini connection
   const initializeGeminiConnection = async () => {
     try {
-      session = await connectToGeminiSdk({
+      session = await connectToGeminiSdk(sessionUuid, {
         onopen: function () {
           console.debug("Gemini Session Opened");
         },
@@ -201,7 +241,10 @@ const handleClientConnection = (clientWs) => {
               });
             }
           } else if (message.toolCall?.functionCalls) {
-            console.log("Gemini Session Tool Calls:", message.toolCall.functionCalls);
+            console.log(
+              "Gemini Session Tool Calls:",
+              message.toolCall.functionCalls
+            );
             const functionResponses = [];
             for (const fc of message.toolCall.functionCalls) {
               const handler = getToolHandler(fc.name);
@@ -219,7 +262,7 @@ const handleClientConnection = (clientWs) => {
               }
               console.log("Gemini Session Tool Response:", obj.response.result);
             }
-            
+
             session.sendToolResponse({ functionResponses });
           } else if (message.serverContent?.interrupted) {
             console.log("Gemini Session Interruption");
@@ -242,6 +285,10 @@ const handleClientConnection = (clientWs) => {
           console.info("Gemini Session Closed");
           clientWs.close();
         },
+      });
+      // begin gemini conversation
+      session.sendRealtimeInput({
+        text: "Please start the conversation."
       });
     } catch (error) {
       console.error("Error initializing Gemini connection:", error);

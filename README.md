@@ -33,7 +33,14 @@ Optional:
 PORT (default: 6037)
 GEMINI_MODEL (default: gemini-2.5-flash-preview-native-audio-dialog)
 GEMINI_INSTRUCTIONS (system prompt)
+
+# Choose one of the following instruction loading methods:
+GEMINI_INSTRUCTIONS="You are a helpful assistant that can answer questions and help with tasks."  # Method 1: Direct variable
+#GEMINI_URL_INSTRUCTIONS="https://your-api.com/instructions"  # Method 2: Web service
+#GEMINI_FILE_INSTRUCTIONS="./instructions.txt"  # Method 3: Local file
+
 ```
+
 
 ## Usage
 
@@ -61,6 +68,53 @@ The service returns a stream of audio data from Gemini. The response includes:
 - Real-time audio chunks from the AI
 - Audio format conversion (8kHz ↔ 16kHz ↔ 24kHz)
 - Session management and WebSocket communication
+
+### Instruction Loading Methods
+
+The application supports three different methods for loading AI instructions, with a specific priority order:
+
+#### 1. Environment Variable (Highest Priority)
+Set the `GEMINI_INSTRUCTIONS` environment variable with your custom instructions:
+
+```bash
+GEMINI_INSTRUCTIONS="You are a specialized customer service agent for a tech company. Always be polite and helpful."
+```
+
+#### 2. Web Service (Medium Priority)
+If no environment variable is set, the application can fetch instructions from a web service using the `GEMINI_URL_INSTRUCTIONS` environment variable:
+
+```bash
+GEMINI_URL_INSTRUCTIONS="https://your-api.com/instructions"
+```
+
+The web service should return a JSON response with a `system` field containing the instructions:
+```json
+{
+  "system": "You are a helpful assistant that provides technical support."
+}
+```
+
+The application will include the session UUID in the request headers as `X-AVR-UUID` for personalized instructions.
+
+#### 3. File (Lowest Priority)
+If neither environment variable nor web service is configured, the application can load instructions from a local file using the `GEMINI_FILE_INSTRUCTIONS` environment variable:
+
+```bash
+GEMINI_FILE_INSTRUCTIONS="./instructions.txt"
+```
+
+The file should contain plain text instructions that will be used as the system prompt.
+
+#### Priority Order
+The application checks for instructions in the following order:
+1. **Environment Variable** (`GEMINI_INSTRUCTIONS`) - Used if set
+2. **Web Service** (`GEMINI_URL_INSTRUCTIONS`) - Used if environment variable is not set
+3. **File** (`GEMINI_FILE_INSTRUCTIONS`) - Used if neither environment variable nor web service is configured
+4. **Default Instructions** - Fallback if none of the above are available
+
+This priority system allows for flexible configuration where you can override instructions at different levels depending on your deployment needs.
+
+
 
 ## Error Handling
 
