@@ -41,6 +41,28 @@ GEMINI_INSTRUCTIONS="You are a helpful assistant that can answer questions and h
 
 ```
 
+### Gemini thinking settings
+
+We’ve added support for the following Gemini settings:
+
+- `GEMINI_THINKING_LEVEL=MINIMAL`
+- `GEMINI_THINKING_BUDGET=0`
+
+More details here 👉 https://ai.google.dev/gemini-api/docs/thinking?hl=en
+
+Supported values for `GEMINI_THINKING_LEVEL`:
+
+- `THINKING_LEVEL_UNSPECIFIED`
+- `LOW`
+- `MEDIUM`
+- `HIGH`
+- `MINIMAL`
+
+`GEMINI_THINKING_BUDGET`:
+
+- `0` → turn off thinking
+- `-1` → enable dynamic thinking
+
 
 ## Usage
 

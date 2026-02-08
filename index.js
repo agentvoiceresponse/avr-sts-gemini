@@ -16,7 +16,7 @@
 
 const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
-const { GoogleGenAI, Modality } = require("@google/genai");
+const { GoogleGenAI, Modality, ThinkingLevel } = require("@google/genai");
 const axios = require("axios");
 const fs = require("fs").promises;
 const { loadTools, getToolHandler } = require("./loadTools");
@@ -54,6 +54,10 @@ const connectToGeminiSdk = async (sessionUuid, callbacks) => {
     responseModalities: [Modality.AUDIO],
     systemInstruction:
       "You are a helpful assistant and answer in a friendly tone.",
+    thinkingConfig: {
+      thinkingLevel: process.env.GEMINI_THINKING_LEVEL || ThinkingLevel.MINIMAL,
+      thinkingBudget: +process.env.GEMINI_THINKING_BUDGET || 0
+    },
   };
 
   if (process.env.GEMINI_INSTRUCTIONS) {
@@ -281,8 +285,8 @@ const handleClientConnection = (clientWs) => {
             })
           );
         },
-        onclose: function () {
-          console.info("Gemini Session Closed");
+        onclose: function (e) {
+          console.info("Gemini Session Closed", e.reason);
           clientWs.close();
         },
       });
