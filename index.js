@@ -48,7 +48,7 @@ const initializeResamplers = async () => {
 
 const connectToGeminiSdk = async (sessionUuid, callbacks) => {
   const model =
-    process.env.GEMINI_MODEL || "gemini-2.5-flash-preview-native-audio-dialog";
+    process.env.GEMINI_MODEL || "gemini-2.5-flash-native-audio-preview-12-2025";
 
   const config = {
     responseModalities: [Modality.AUDIO],
