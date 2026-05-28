@@ -1,6 +1,6 @@
 {
   "name": "avr-sts-gemini",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "author": "Agent Voice Response <info@agentvoiceresponse.com>",
   "description": "Gemini Speech-to-Speech service for Agent Voice Response",
   "main": "index.js",
