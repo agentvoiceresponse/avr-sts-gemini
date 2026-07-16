@@ -111,7 +111,7 @@ const initializeResamplers = async () => {
 
 const connectToGeminiSdk = async (sessionUuid, callbacks) => {
   const model =
-    process.env.GEMINI_MODEL || "gemini-2.5-flash-native-audio-preview-12-2025";
+    process.env.GEMINI_MODEL || "gemini-3.1-flash-live-preview";
 
   const config = {
     responseModalities: [Modality.AUDIO],
@@ -119,7 +119,6 @@ const connectToGeminiSdk = async (sessionUuid, callbacks) => {
       "You are a helpful assistant and answer in a friendly tone.",
     thinkingConfig: {
       thinkingLevel: process.env.GEMINI_THINKING_LEVEL || ThinkingLevel.MINIMAL,
-      thinkingBudget: +process.env.GEMINI_THINKING_BUDGET || 0
     },
   };
 

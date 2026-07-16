@@ -56,7 +56,7 @@ AVR-prefixed aliases (optional): `GEMINI_USE_VERTEXAI`, `GEMINI_VERTEX_PROJECT`,
 
 ```
 PORT (default: 6037)
-GEMINI_MODEL (default: gemini-2.5-flash-native-audio-preview-12-2025 in code)
+GEMINI_MODEL (default: gemini-3.1-flash-live-preview in code)
 GEMINI_API_VERSION (optional API version override)
 GEMINI_INSTRUCTIONS (system prompt)
 
@@ -72,7 +72,6 @@ GEMINI_INSTRUCTIONS="You are a helpful assistant that can answer questions and h
 We’ve added support for the following Gemini settings:
 
 - `GEMINI_THINKING_LEVEL=MINIMAL`
-- `GEMINI_THINKING_BUDGET=0`
 
 More details here 👉 https://ai.google.dev/gemini-api/docs/thinking?hl=en
 
@@ -83,11 +82,6 @@ Supported values for `GEMINI_THINKING_LEVEL`:
 - `MEDIUM`
 - `HIGH`
 - `MINIMAL`
-
-`GEMINI_THINKING_BUDGET`:
-
-- `0` → turn off thinking
-- `-1` → enable dynamic thinking
 
 
 ## Usage
